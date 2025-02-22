@@ -1,6 +1,10 @@
 # Redis Matching Engine
+----
 
 A high-performance order matching engine implemented in Redis using Lua scripting. This matching engine provides real-time order book management and trade matching capabilities.
+
+## DISCLAIMER
+THIS IS JUST A TOY MATCHING ENGINE FOR TESTING PURPOSES. IT IS NOT INTENDED FOR PRODUCTION USE.
 
 ## Overview
 
@@ -76,7 +80,7 @@ ARGS:
 
 ```
 
-### Performance
+## Performance
 
 ```
 
@@ -94,5 +98,14 @@ ARGS:
 
 
   1 passing (263ms)
-  
 ```
+
+## TODO
+- [ ] Add market orders
+- [ ] Add order cancellation
+- [ ] Add order amendment
+- [ ] Add order status updates (subscribe to order status changes)
+- [ ] Add order history (maybe this should be handled by the client?)
+- [ ] Add order book snapshot
+- [ ] High Availability
+- [ ] Web UI
