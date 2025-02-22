@@ -10,10 +10,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@types/blessed": "^0.1.25",
     "@types/chai": "^5.0.1",
+    "@types/ioredis": "^5.0.0",
     "@types/mocha": "^10.0.10",
+    "blessed": "^0.1.81",
     "chai": "^5.2.0",
     "chai-as-promised": "^8.0.1",
-    "mocha": "^10.8.2"
+    "ioredis": "^5.5.0",
+    "mocha": "^10.8.2",
+    "moment": "^2.30.1"
   }
 }

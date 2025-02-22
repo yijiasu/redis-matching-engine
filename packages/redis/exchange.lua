@@ -59,50 +59,86 @@ local order_id = string.format("%.0f-%05d", timestamp, order_seq)
 
 -- Function to create a composite score from price and sequence
 local function create_score(price, seq, is_buy)
-    -- For buy orders, negate the price to maintain correct ordering
-    local base_price = is_buy and -price or price
-    -- Use price as integer part
-    -- Use ((timestamp * 100) + seq) / 1e15 as fraction part to ensure proper ordering
-    -- timestamp is in milliseconds (1e13) like 1740220532407
-    local fraction = ((timestamp * 100) + seq) / 1e15
-    return base_price + fraction
+    -- Mod timestamp with 100000 to keep it manageable (gives us 0-99999)
+    -- Then add sequence (0-99) to maintain time priority within same price
+    local time_component = (timestamp % 100000) * 100 + seq
+    -- Add as a small fraction to maintain price priority
+    local fraction = is_buy and (1 - (time_component / 1000000)) or (time_component / 1000000)
+    return price + fraction
 end
 
 -- Function to publish orderbook updates
 local function publish_orderbook()
-    -- Get top 100 orders from each side
-    local buy_orders = redis.call("ZRANGE", buy_book, 0, 99, "WITHSCORES")
-    local sell_orders = redis.call("ZREVRANGE", sell_book, 0, 99, "WITHSCORES")
-    
-    local bids = {}
-    local asks = {}
-    
-    -- Process buy orders
-    for i = 1, #buy_orders, 2 do
-        local book_order_id = buy_orders[i]
-        local price = tonumber(redis.call("HGET", "order:" .. book_order_id, "price"))
-        local qty = tonumber(redis.call("HGET", "order:" .. book_order_id, "qty"))
-
-        -- redis.log(redis.LOG_NOTICE, "Book order ID: " .. book_order_id)
-        -- redis.log(redis.LOG_NOTICE, "Price: " .. (price and price or "nil"))
-        -- redis.log(redis.LOG_NOTICE, "Qty: " .. (qty and qty or "nil"))
-        table.insert(bids, price .. "," .. qty)
+    local function aggregate_orders(orders, start_index)
+        start_index = start_index or 0
+        local aggregated = {}
+        local price_map = {}
+        local current_count = 0
+        local batch_size = 100
+        
+        while current_count < 100 do
+            -- Get next batch of orders
+            local batch = redis.call("ZRANGE", orders, start_index, start_index + batch_size - 1, "WITHSCORES")
+            if #batch == 0 then
+                break  -- No more orders
+            end
+            
+            -- Process batch
+            for i = 1, #batch, 2 do
+                local order_id = batch[i]
+                local price = tonumber(redis.call("HGET", "order:" .. order_id, "price"))
+                local qty = tonumber(redis.call("HGET", "order:" .. order_id, "qty"))
+                
+                if price and qty then
+                    if not price_map[price] then
+                        price_map[price] = qty
+                        current_count = current_count + 1
+                        table.insert(aggregated, {price = price, qty = qty})
+                    else
+                        price_map[price] = price_map[price] + qty
+                        -- Find and update the quantity in aggregated table
+                        for _, entry in ipairs(aggregated) do
+                            if entry.price == price then
+                                entry.qty = price_map[price]
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+            
+            start_index = start_index + batch_size
+            
+            if current_count >= 100 then
+                break
+            end
+            
+            if #batch < batch_size * 2 then  -- Each order takes 2 entries in batch
+                break  -- No more orders available
+            end
+        end
+        
+        return aggregated
     end
     
-    -- Process sell orders
-    for i = 1, #sell_orders, 2 do
-        local book_order_id = sell_orders[i]
-        local price = tonumber(redis.call("HGET", "order:" .. book_order_id, "price"))
-        local qty = tonumber(redis.call("HGET", "order:" .. book_order_id, "qty"))
-
-        -- redis.log(redis.LOG_NOTICE, "Book order ID: " .. book_order_id)
-        -- redis.log(redis.LOG_NOTICE, "Price: " .. (price and price or "nil"))
-        -- redis.log(redis.LOG_NOTICE, "Qty: " .. (qty and qty or "nil"))
-        table.insert(asks, price .. "," .. qty)
+    -- Get aggregated orders
+    local bids = aggregate_orders(buy_book)
+    local asks = aggregate_orders(sell_book)
+    
+    -- Convert to strings
+    local bid_strings = {}
+    local ask_strings = {}
+    
+    for _, bid in ipairs(bids) do
+        table.insert(bid_strings, bid.price .. "," .. bid.qty)
+    end
+    
+    for _, ask in ipairs(asks) do
+        table.insert(ask_strings, ask.price .. "," .. ask.qty)
     end
     
     -- Combine bids and asks with a separator
-    local message = table.concat(bids, "|") .. ";" .. table.concat(asks, "|")
+    local message = table.concat(bid_strings, "|") .. "\n" .. table.concat(ask_strings, "|")
     redis.call("PUBLISH", "orderbook:" .. symbol, message)
 end
 
@@ -157,30 +193,20 @@ local function match_with_book(remaining_qty, order_book, is_buy_order)
         local best_order = redis.call(zrange_func, opposite_book, 0, 0, "WITHSCORES")
         
         if #best_order == 0 then
-            -- redis.log(redis.LOG_NOTICE, "No orders in book")
             break
         end
         
         local match_order_id = best_order[1]
         local best_price = tonumber(redis.call("HGET", "order:" .. match_order_id, "price"))
         
-        -- -- Debug log the prices
-        -- redis.log(redis.LOG_NOTICE, string.format(
-        --     "Matching Order ID: %s - Best Price: %s, Order Price: %s, Side: %s",
-        --     tostring(match_order_id),
-        --     tostring(best_price),
-        --     tostring(price),
-        --     tostring(side)
-        -- ))
-        
-        if (is_buy_order and best_price > price) or 
-           (not is_buy_order and best_price < price) then
-            break
-        end
-        
-        -- the state can become partial since we found a match
-        if match_result == "open" then
-            match_result = "partial"
+        if is_buy_order then
+            if price < best_price then
+                break
+            end
+        else
+            if price > best_price then
+                break
+            end
         end
         
         local match_qty = tonumber(redis.call("HGET", "order:" .. match_order_id, "qty"))
@@ -190,13 +216,10 @@ local function match_with_book(remaining_qty, order_book, is_buy_order)
         table.insert(trade_ids, trade_id)
         
         if match_qty > remaining_qty then
-            -- If the matching order has more quantity than we need,
-            -- update its remaining quantity and stop matching
             redis.call("HSET", "order:" .. match_order_id, "qty", match_qty - remaining_qty)
             remaining_qty = 0
             match_result = "filled"
         else
-            -- else delete the matching order from the book because it's been fully matched
             redis.call("DEL", "order:" .. match_order_id)
             redis.call("ZREM", opposite_book, match_order_id)
             remaining_qty = remaining_qty - match_qty
