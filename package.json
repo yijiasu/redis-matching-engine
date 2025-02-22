@@ -1,0 +1,22 @@
+{
+  "name": "redis-matching-engine",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.4.1",
+  "dependencies": {
+    "@types/debug": "^4.1.12",
+    "@types/node": "^22.13.4",
+    "debug": "^4.4.0",
+    "log4js": "^6.9.1",
+    "ts-node": "^10.9.2",
+    "ioredis": "^5.5.0",
+    "workspace-root": "^3.3.1"
+  }
+}

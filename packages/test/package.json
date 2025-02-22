@@ -1,0 +1,19 @@
+{
+  "name": "@rme/test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/chai": "^5.0.1",
+    "@types/mocha": "^10.0.10",
+    "chai": "^5.2.0",
+    "chai-as-promised": "^8.0.1",
+    "mocha": "^10.8.2"
+  }
+}
